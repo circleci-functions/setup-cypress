@@ -63,3 +63,15 @@ tasks:
       - task: lint-tasks
       - task: test
       - task: dry-run
+
+  publish:
+    desc: Build and publish setup-cypress to S3 (VERSION required)
+    requires:
+      vars: [VERSION]
+    cmds:
+      - go tool release --name setup-cypress --version "{{.VERSION}}"
+
+  publish-prerelease:
+    desc: Build and publish this commit as a pre-release, without making it the latest
+    cmds:
+      - go tool release --name setup-cypress --prerelease
