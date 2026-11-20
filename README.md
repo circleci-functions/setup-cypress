@@ -37,6 +37,8 @@ Installs the binary as [`install`](#install) does, then runs
 | `suite` | | Required. The test suite to run |
 | `base-url` | `$DEPLOYMENT_URL`, then `$VERCEL_DEPLOYMENT_URL` | Site to test, passed to Cypress as `baseUrl`. With none set, the Cypress config's `baseUrl` stands |
 | `working-directory` | `.` | Directory holding the project's `package.json`, with its dependencies installed |
+| `screenshots-folder` | `cypress/screenshots` | Where Cypress saves screenshots, relative to `working-directory` |
+| `videos-folder` | `cypress/videos` | Where Cypress saves videos, relative to `working-directory` |
 
 If `.circleci/test-suites.yml` defines `suite`, testsuite runs it as written. Otherwise
 `--runner=cypress` has testsuite run its default Cypress suite, which:
@@ -66,6 +68,21 @@ A `base-url` without a scheme gets `https://`, as deploy steps often export a ba
 On Windows, testsuite's default Cypress suite does not run: its `find` resolves to Windows' own
 `FIND`, and it passes spec paths to bash with backslashes, which bash drops. Define the suite in
 `.circleci/test-suites.yml` instead.
+
+### Artifacts
+
+After the suite runs, whether it passed or not, the step stores as artifacts:
+
+| Artifact | What |
+|---|---|
+| `cypress/screenshots` | Screenshots Cypress saved. By default it takes them only of failures |
+| `cypress/videos` | Videos Cypress saved, if the config turns `video` on |
+| `cypress/results` | The JUnit XML testsuite collected, which it also stores as test results |
+
+`screenshots-folder` and `videos-folder` only say where to look, so match them to a Cypress config
+that moves its `screenshotsFolder` or `videosFolder`. Reports are found where testsuite writes them
+by default; when a suite's config names its own `outputs` paths, the XML is there instead and is
+not stored as artifacts.
 
 ## install
 
