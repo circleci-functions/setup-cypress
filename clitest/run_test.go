@@ -1,6 +1,7 @@
 package clitest_test
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -99,4 +100,32 @@ func TestRun_DoesNotRunTheSuiteWhenInstallFails(t *testing.T) {
 	out, err := e.run(t, "--suite=e2e", "--working-directory="+e.project)
 	assert.Check(t, err != nil, out)
 	assert.Check(t, cmp.Nil(e.testsuiteRun(t)))
+}
+
+func TestRun_DefaultsToTheDeployment(t *testing.T) {
+	tests := []struct {
+		name string
+		vars map[string]string
+		flag string
+		want string
+	}{
+		{"deployment", map[string]string{"DEPLOYMENT_URL": "https://deploy.example.com"}, "", "https://deploy.example.com"},
+		{"vercel deployment", map[string]string{"VERCEL_DEPLOYMENT_URL": "my-app-abc123.vercel.app"}, "", "https://my-app-abc123.vercel.app"},
+		{"deployment first", map[string]string{"DEPLOYMENT_URL": "https://deploy.example.com", "VERCEL_DEPLOYMENT_URL": "my-app.vercel.app"}, "", "https://deploy.example.com"},
+		{"flag first", map[string]string{"DEPLOYMENT_URL": "https://deploy.example.com"}, "https://flag.example.com", "https://flag.example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			maps.Copy(e.vars, tt.vars)
+
+			args := []string{"--suite=e2e", "--working-directory=" + e.project}
+			if tt.flag != "" {
+				args = append(args, "--base-url="+tt.flag)
+			}
+			out, err := e.run(t, args...)
+			assert.NilError(t, err, out)
+			assert.Check(t, cmp.Equal(e.testsuiteRun(t)["base"], tt.want))
+		})
+	}
 }

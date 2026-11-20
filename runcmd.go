@@ -19,7 +19,7 @@ import (
 type runCmd struct {
 	WorkingDirectory string `name:"working-directory" default:"." help:"Directory holding the project's package.json, with its dependencies installed. testsuite runs here." example:"apps/web"`
 	Suite            string `required:"" help:"Test suite to run with circleci testsuite. Unless .circleci/test-suites.yml defines it, testsuite's default Cypress suite runs: the specs under cypress/e2e, reported with cypress-circleci-reporter." example:"e2e"`
-	BaseURL          string `name:"base-url" help:"URL of the site to test, passed to Cypress as baseUrl. Empty keeps the Cypress config's baseUrl." example:"https://my-app.example.com"`
+	BaseURL          string `name:"base-url" help:"URL of the site to test, passed to Cypress as baseUrl. Empty uses DEPLOYMENT_URL, then VERCEL_DEPLOYMENT_URL, which a deploy step exports, and with neither set keeps the Cypress config's baseUrl." example:"https://my-app.example.com"`
 }
 
 func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
@@ -56,10 +56,21 @@ func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
 	return err
 }
 
+// deploymentURLEnvVars are where deploy steps leave the URL they deployed to,
+// in the order they are tried: the name deploy functions share, then the one
+// setup-vercel exports.
+var deploymentURLEnvVars = []string{"DEPLOYMENT_URL", "VERCEL_DEPLOYMENT_URL"}
+
 // baseURL returns the site to test, with a scheme, or "" to leave Cypress's
 // own config in charge.
 func baseURL(flag string) string {
 	base := strings.TrimSpace(flag)
+	for _, name := range deploymentURLEnvVars {
+		if base != "" {
+			break
+		}
+		base = strings.TrimSpace(os.Getenv(name))
+	}
 	if base == "" {
 		return ""
 	}
