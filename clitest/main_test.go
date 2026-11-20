@@ -62,7 +62,9 @@ esac
 // fakeTestsuite stands in for the circleci CLI's testsuite. It logs the
 // arguments, directory and Cypress variables it was run with, saves a
 // screenshot and a video into each folder named in FAKE_TESTSUITE_MEDIA, as
-// Cypress would, and exits with FAKE_TESTSUITE_EXIT.
+// Cypress would, writes a JUnit directory into its temporary directory for
+// each number in FAKE_TESTSUITE_REPORTS, as testsuite does, and exits with
+// FAKE_TESTSUITE_EXIT.
 const fakeTestsuite = `#!/bin/sh
 {
   echo "args=$*"
@@ -71,6 +73,12 @@ const fakeTestsuite = `#!/bin/sh
   echo "folder=$CYPRESS_CACHE_FOLDER"
   echo "skip=$CYPRESS_INSTALL_BINARY"
 } >> "$FAKE_TESTSUITE_LOG"
+if [ -n "$FAKE_TESTSUITE_REPORTS" ]; then
+  for n in $FAKE_TESTSUITE_REPORTS; do
+    mkdir -p "$TMPDIR/test-suite-outputs.junit-directory-$n/1"
+    echo '<testsuites/>' > "$TMPDIR/test-suite-outputs.junit-directory-$n/1/result-1.xml"
+  done
+fi
 for media in $FAKE_TESTSUITE_MEDIA; do
   mkdir -p "$media" && echo media > "$media/home.cy.js.out"
 done
@@ -85,6 +93,7 @@ type env struct {
 	folder    string
 	log       string
 	testsuite string
+	tmp       string
 	vars      map[string]string
 }
 
@@ -99,6 +108,7 @@ func newEnv(t *testing.T) *env {
 		folder:    filepath.Join(t.TempDir(), "Cypress"),
 		log:       filepath.Join(t.TempDir(), "cypress.log"),
 		testsuite: filepath.Join(t.TempDir(), "testsuite.log"),
+		tmp:       t.TempDir(),
 	}
 	pkg := filepath.Join(e.project, "node_modules", "cypress")
 	bin := filepath.Join(e.project, "node_modules", ".bin")
@@ -114,6 +124,7 @@ func newEnv(t *testing.T) *env {
 		"FAKE_CYPRESS_LOG":     e.log,
 		"FAKE_TESTSUITE_LOG":   e.testsuite,
 		"PATH":                 circleci + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"TMPDIR":               e.tmp,
 	}
 	return e
 }
