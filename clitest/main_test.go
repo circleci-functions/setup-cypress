@@ -60,8 +60,9 @@ esac
 `
 
 // fakeTestsuite stands in for the circleci CLI's testsuite. It logs the
-// arguments, directory and Cypress variables it was run with, and exits with
-// FAKE_TESTSUITE_EXIT.
+// arguments, directory and Cypress variables it was run with, saves a
+// screenshot and a video into each folder named in FAKE_TESTSUITE_MEDIA, as
+// Cypress would, and exits with FAKE_TESTSUITE_EXIT.
 const fakeTestsuite = `#!/bin/sh
 {
   echo "args=$*"
@@ -70,6 +71,9 @@ const fakeTestsuite = `#!/bin/sh
   echo "folder=$CYPRESS_CACHE_FOLDER"
   echo "skip=$CYPRESS_INSTALL_BINARY"
 } >> "$FAKE_TESTSUITE_LOG"
+for media in $FAKE_TESTSUITE_MEDIA; do
+  mkdir -p "$media" && echo media > "$media/home.cy.js.out"
+done
 exit "${FAKE_TESTSUITE_EXIT:-0}"
 `
 
@@ -148,6 +152,15 @@ func (e *env) testsuiteRun(t *testing.T) map[string]string {
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		k, v, _ := strings.Cut(line, "=")
 		got[k] = v
+	}
+	return got
+}
+
+// artifacts returns the stored artifacts, destination to path.
+func (e *env) artifacts() map[string]string {
+	got := map[string]string{}
+	for _, a := range e.sandbox.Cache.StoredArtifacts() {
+		got[a.Destination] = a.Path
 	}
 	return got
 }
