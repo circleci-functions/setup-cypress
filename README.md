@@ -1,7 +1,8 @@
 # setup-cypress
 
 A CircleCI function that installs the [Cypress](https://www.cypress.io) binary your project needs,
-caching it across jobs.
+caching it across jobs, and runs your Cypress suite with `circleci testsuite`, which splits it
+across parallel containers and stores the results.
 
 ```yaml
 functions:
@@ -12,16 +13,59 @@ jobs:
   e2e:
     docker:
       - image: cimg/node:lts-browsers
+    parallelism: 4
     environment:
       CYPRESS_INSTALL_BINARY: "0"     # leave the binary to setup-cypress
     steps:
       - checkout
       - node/install-packages
-      - cypress/install
+      - cypress:                      # same as cypress/run
+          with:
+            suite: e2e
 ```
 
 Run `circleci function add github.com/circleci-functions/setup-cypress --as cypress` to write the
 entry.
+
+## run
+
+Installs the binary as [`install`](#install) does, then runs
+`circleci testsuite run <suite> --runner=cypress` in the working directory.
+
+| Flag | Default | Description |
+|---|---|---|
+| `suite` | | Required. The test suite to run |
+| `base-url` | `$DEPLOYMENT_URL`, then `$VERCEL_DEPLOYMENT_URL` | Site to test, passed to Cypress as `baseUrl`. With none set, the Cypress config's `baseUrl` stands |
+| `working-directory` | `.` | Directory holding the project's `package.json`, with its dependencies installed |
+
+If `.circleci/test-suites.yml` defines `suite`, testsuite runs it as written. Otherwise
+`--runner=cypress` has testsuite run its default Cypress suite, which:
+
+- finds specs with `find ./cypress/e2e -type f -name '*.cy.*'`, whatever the Cypress config's
+  `specPattern` says
+- runs them with [`cypress-circleci-reporter`](https://www.npmjs.com/package/cypress-circleci-reporter),
+  which the project needs as a dev dependency along with `mocha`
+
+A project that keeps its specs anywhere else, or names them differently, needs a suite of its own:
+run `circleci testsuite generate <suite> --template=cypress`, change its `discover`, and commit the
+file. Without one:
+
+| Project | What happens |
+|---|---|
+| No `cypress/e2e` directory | The step fails: the discover command exits 1 |
+| No `*.cy.*` files under `cypress/e2e` | The step fails: testsuite discovers no tests |
+| Some specs under `cypress/e2e`, others elsewhere | Only those under `cypress/e2e` run, and the step can pass |
+| `cypress-circleci-reporter` not installed | The step fails: Cypress cannot load the reporter |
+
+testsuite splits the specs across the job's `parallelism` by their past timings, and stores the
+results in the job's Tests tab, so the function does neither itself. The step fails if any spec
+fails.
+
+A `base-url` without a scheme gets `https://`, as deploy steps often export a bare host name.
+
+On Windows, testsuite's default Cypress suite does not run: its `find` resolves to Windows' own
+`FIND`, and it passes spec paths to bash with backslashes, which bash drops. Define the suite in
+`.circleci/test-suites.yml` instead.
 
 ## install
 
