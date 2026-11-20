@@ -15,6 +15,11 @@ executors:
   go:
     docker:
       - image: cimg/go:1.26
+  # The acceptance tests need Node.js, and the libraries and Xvfb Cypress
+  # verifies its binary with.
+  go-browsers:
+    docker:
+      - image: cimg/go:1.26-browsers
 
 jobs:
   test:
@@ -49,6 +54,26 @@ jobs:
             - setup-cypress-go-
       - run: task dry-run
 
+  # The real Cypress package and binary, from npm and Cypress's CDN.
+  acceptance:
+    executor: go-browsers
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - setup-cypress-go-{{ checksum "go.sum" }}-
+            - setup-cypress-go-
+      - run:
+          name: Run acceptance tests
+          command: task acceptance
+          environment:
+            # Use the job's own cache rather than the in-memory stand-in, so the
+            # round-trips here exercise the real thing. The suite fails rather
+            # than falling back if it can't reach it.
+            TOOLKIT_CACHE_MODE: live
+      - store_test_results:
+          path: test-results
+
 workflows:
   test-publish:
     when:
@@ -56,6 +81,7 @@ workflows:
     jobs:
       - test
       - build
+      - acceptance
       - toolkit/release-pr:
           name: release-pr
           executor: go
@@ -65,6 +91,7 @@ workflows:
           requires: &release-requires
             - test
             - build
+            - acceptance
           context: [github-release]
           filters:
             branches:

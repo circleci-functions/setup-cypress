@@ -1,0 +1,7 @@
+{
+  "name": "setup-cypress-acceptance",
+  "private": true,
+  "devDependencies": {
+    "cypress": "16.3.0"
+  }
+}
