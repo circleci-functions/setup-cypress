@@ -41,6 +41,10 @@ var testdata embed.FS
 
 var binaryPath string
 
+// sharedFolder is a Cypress cache folder the run tests share, so that they
+// download the binary once between them.
+var sharedFolder string
+
 func TestMain(m *testing.M) {
 	status, err := runTests(m)
 	if err != nil {
@@ -51,6 +55,13 @@ func TestMain(m *testing.M) {
 }
 
 func runTests(m *testing.M) (int, error) {
+	dir, err := os.MkdirTemp("", "setup-cypress-acceptance-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(dir)
+	sharedFolder = filepath.Join(dir, "Cypress")
+
 	if bin := os.Getenv(binaryPathEnvVar); bin != "" {
 		abs, err := filepath.Abs(bin)
 		if err != nil {
