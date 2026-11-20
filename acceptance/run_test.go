@@ -16,6 +16,7 @@ import (
 	"gotest.tools/v3/assert/cmp"
 
 	"github.com/circleci-functions/toolkit/sdk"
+	"github.com/circleci-functions/toolkit/sdk/sdktest"
 )
 
 // site serves a home page whose heading is heading, which the test project's
@@ -53,7 +54,8 @@ func suite(name string) string {
 }
 
 // runEnv is an env sharing one Cypress cache folder across tests, so the
-// binary is downloaded once rather than per test. The project is made a git
+// binary is downloaded once rather than per test, and the in-memory cache, so
+// the tests can see the artifacts stored. The project is made a git
 // repository, as a checkout is, since testsuite finds the project's root by
 // its .git. The circleci CLI finds its extensions under the XDG data
 // directory, which defaults to one in the home directory the sandbox
@@ -65,6 +67,7 @@ func runEnv(t *testing.T) *env {
 	}
 	needTestsuite(t)
 	e := newEnv(t)
+	e.sandbox = sdktest.NewSandbox(t)
 	git := exec.Command("git", "init", "--quiet")
 	git.Dir = e.project
 	out, err := git.CombinedOutput()
@@ -100,6 +103,15 @@ func TestRun_FailsWhenASpecFails(t *testing.T) {
 	assert.Check(t, err != nil, out)
 	assert.Check(t, cmp.Contains(out, "expected '<h1>' to have text 'home', but the text was 'broken'"))
 	assert.Check(t, cmp.Contains(out, `circleci testsuite run "`+suite("fails")+`" failed`))
+
+	stored := map[string]string{}
+	for _, a := range e.sandbox.Cache.StoredArtifacts() {
+		stored[a.Destination] = a.Path
+	}
+	shots, _ := filepath.Glob(filepath.Join(stored["cypress/screenshots"], "home.cy.js", "*.png"))
+	assert.Check(t, cmp.Len(shots, 1), "the failure's screenshot")
+	reports, _ := filepath.Glob(filepath.Join(stored["cypress/results"], "*", "result-*.xml"))
+	assert.Check(t, cmp.Len(reports, 1), "the spec's JUnit report")
 }
 
 func TestRun_DefaultsToTheDeployment(t *testing.T) {
