@@ -14,6 +14,7 @@ import (
 )
 
 type cli struct {
+	Run     runCmd     `cmd:"" default:"withargs" help:"Install the Cypress binary, then run a Cypress suite with circleci testsuite. Runs when no command is given."`
 	Install installCmd `cmd:"" help:"Install the Cypress binary the project's Cypress package needs, caching it across jobs."`
 }
 

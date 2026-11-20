@@ -59,14 +59,29 @@ case "$1 $2" in
 esac
 `
 
+// fakeTestsuite stands in for the circleci CLI's testsuite. It logs the
+// arguments, directory and Cypress variables it was run with, and exits with
+// FAKE_TESTSUITE_EXIT.
+const fakeTestsuite = `#!/bin/sh
+{
+  echo "args=$*"
+  echo "dir=$(pwd -P)"
+  echo "base=$CYPRESS_BASE_URL"
+  echo "folder=$CYPRESS_CACHE_FOLDER"
+  echo "skip=$CYPRESS_INSTALL_BINARY"
+} >> "$FAKE_TESTSUITE_LOG"
+exit "${FAKE_TESTSUITE_EXIT:-0}"
+`
+
 const version = "15.7.1"
 
 type env struct {
-	sandbox *sdktest.Sandbox
-	project string
-	folder  string
-	log     string
-	vars    map[string]string
+	sandbox   *sdktest.Sandbox
+	project   string
+	folder    string
+	log       string
+	testsuite string
+	vars      map[string]string
 }
 
 func newEnv(t *testing.T) *env {
@@ -75,10 +90,11 @@ func newEnv(t *testing.T) *env {
 		t.Skip("the fake Cypress CLI is a shell script")
 	}
 	e := &env{
-		sandbox: sdktest.NewSandbox(t),
-		project: t.TempDir(),
-		folder:  filepath.Join(t.TempDir(), "Cypress"),
-		log:     filepath.Join(t.TempDir(), "cypress.log"),
+		sandbox:   sdktest.NewSandbox(t),
+		project:   t.TempDir(),
+		folder:    filepath.Join(t.TempDir(), "Cypress"),
+		log:       filepath.Join(t.TempDir(), "cypress.log"),
+		testsuite: filepath.Join(t.TempDir(), "testsuite.log"),
 	}
 	pkg := filepath.Join(e.project, "node_modules", "cypress")
 	bin := filepath.Join(e.project, "node_modules", ".bin")
@@ -86,10 +102,14 @@ func newEnv(t *testing.T) *env {
 	assert.NilError(t, os.MkdirAll(bin, 0o750))
 	assert.NilError(t, os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"version": "`+version+`"}`), 0o600))
 	assert.NilError(t, os.WriteFile(filepath.Join(bin, "cypress"), []byte(fakeCypress), 0o700)) //nolint:gosec // an executable script
+	circleci := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(circleci, "circleci"), []byte(fakeTestsuite), 0o700)) //nolint:gosec // an executable script
 	e.vars = map[string]string{
 		"CYPRESS_CACHE_FOLDER": e.folder,
 		"FAKE_CYPRESS_VERSION": version,
 		"FAKE_CYPRESS_LOG":     e.log,
+		"FAKE_TESTSUITE_LOG":   e.testsuite,
+		"PATH":                 circleci + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}
 	return e
 }
@@ -113,6 +133,23 @@ func (e *env) calls(t *testing.T) []string {
 	assert.NilError(t, err)
 	assert.NilError(t, os.Remove(e.log))
 	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+// testsuiteRun returns what the fake testsuite was run with, or nil if it was
+// not run.
+func (e *env) testsuiteRun(t *testing.T) map[string]string {
+	t.Helper()
+	b, err := os.ReadFile(e.testsuite)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	assert.NilError(t, err)
+	got := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		k, v, _ := strings.Cut(line, "=")
+		got[k] = v
+	}
+	return got
 }
 
 func (e *env) exported(t *testing.T) map[string]string {

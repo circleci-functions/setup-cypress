@@ -29,12 +29,20 @@ func (c *installCmd) Run(ctx context.Context, client *sdk.Client) error {
 	return err
 }
 
+// installed is a project whose Cypress binary is ready to run.
+type installed struct {
+	*cypress.Project
+	// CacheFolder is where the binary is, which Cypress must be told when the
+	// folder came from this step's export rather than the environment.
+	CacheFolder string
+}
+
 // install makes sure the binary for the Cypress installed in dir is in
 // Cypress's cache folder, restoring it from the job cache or downloading it,
 // verifies it, and tells later steps where it is. `cypress install` runs even
 // after a restore, since it finishes or replaces a binary that is incomplete
 // and does nothing to one that is not.
-func install(ctx context.Context, client *sdk.Client, dir string) (*cypress.Project, error) {
+func install(ctx context.Context, client *sdk.Client, dir string) (*installed, error) {
 	p, err := cypress.Open(dir)
 	if err != nil {
 		return nil, err
@@ -70,7 +78,7 @@ func install(ctx context.Context, client *sdk.Client, dir string) (*cypress.Proj
 	if err := export(map[string]string{cacheFolderEnvVar: folder}); err != nil {
 		return nil, err
 	}
-	return p, nil
+	return &installed{Project: p, CacheFolder: folder}, nil
 }
 
 // binaryCacheKey names the cache entry for one Cypress version on one
