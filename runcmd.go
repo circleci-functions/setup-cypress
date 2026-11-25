@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -17,9 +19,11 @@ import (
 )
 
 type runCmd struct {
-	WorkingDirectory string `name:"working-directory" default:"." help:"Directory holding the project's package.json, with its dependencies installed. testsuite runs here." example:"apps/web"`
-	Suite            string `required:"" help:"Test suite to run with circleci testsuite. Unless .circleci/test-suites.yml defines it, testsuite's default Cypress suite runs: the specs under cypress/e2e, reported with cypress-circleci-reporter." example:"e2e"`
-	BaseURL          string `name:"base-url" help:"URL of the site to test, passed to Cypress as baseUrl. Empty uses DEPLOYMENT_URL, then VERCEL_DEPLOYMENT_URL, which a deploy step exports, and with neither set keeps the Cypress config's baseUrl." example:"https://my-app.example.com"`
+	WorkingDirectory  string `name:"working-directory" default:"." help:"Directory holding the project's package.json, with its dependencies installed. testsuite runs here." example:"apps/web"`
+	Suite             string `required:"" help:"Test suite to run with circleci testsuite. Unless .circleci/test-suites.yml defines it, testsuite's default Cypress suite runs: the specs under cypress/e2e, reported with cypress-circleci-reporter." example:"e2e"`
+	ScreenshotsFolder string `name:"screenshots-folder" default:"cypress/screenshots" help:"Where Cypress saves screenshots, as its screenshotsFolder setting, relative to the working directory. Stored as artifacts after the run."`
+	VideosFolder      string `name:"videos-folder" default:"cypress/videos" help:"Where Cypress saves videos, as its videosFolder setting, relative to the working directory. Stored as artifacts after the run."`
+	BaseURL           string `name:"base-url" help:"URL of the site to test, passed to Cypress as baseUrl. Empty uses DEPLOYMENT_URL, then VERCEL_DEPLOYMENT_URL, which a deploy step exports, and with neither set keeps the Cypress config's baseUrl." example:"https://my-app.example.com"`
 }
 
 func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
@@ -38,6 +42,8 @@ func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
 		fmt.Fprintf(os.Stderr, "setup-cypress: testing %s\n", base)
 	}
 
+	earlier := reports()
+
 	cmd := exec.CommandContext(ctx, testsuite, "testsuite", "run", c.Suite, "--runner=cypress") //nolint:gosec // the job's own CLI
 	cmd.Dir = p.Dir
 	cmd.Env = env
@@ -49,11 +55,84 @@ func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
 	cmd.WaitDelay = 20 * time.Second
 
 	err = cmd.Run()
+	c.storeMedia(ctx, client, p.Dir)
+	storeReports(context.WithoutCancel(ctx), client, earlier)
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return fmt.Errorf("circleci testsuite run %q failed (exit %d)", c.Suite, exitErr.ExitCode())
 	}
 	return err
+}
+
+// storeMedia stores the screenshots and videos Cypress saved, whether or not
+// the suite passed: by default Cypress takes screenshots only of failures.
+// The step may have been cancelled, and what was saved is still worth keeping.
+func (c *runCmd) storeMedia(ctx context.Context, client *sdk.Client, dir string) {
+	ctx = context.WithoutCancel(ctx)
+	store(ctx, client, inDir(dir, c.ScreenshotsFolder), "cypress/screenshots")
+	store(ctx, client, inDir(dir, c.VideosFolder), "cypress/videos")
+}
+
+// reportsPattern matches the JUnit outputs testsuite writes. Unless a
+// suite's config names them, it puts them in the temporary directory, in a
+// CircleCI job through the agent rather than the process it starts.
+var reportsPattern = filepath.Join(os.TempDir(), "test-suite-outputs.junit*")
+
+// reports returns the JUnit outputs in the temporary directory.
+func reports() map[string]bool {
+	paths, _ := filepath.Glob(reportsPattern)
+	found := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		found[p] = true
+	}
+	return found
+}
+
+// storeReports stores the JUnit outputs testsuite wrote since earlier was
+// taken. testsuite stores the results it reads, but not the XML itself.
+func storeReports(ctx context.Context, client *sdk.Client, earlier map[string]bool) {
+	var fresh []string
+	for p := range reports() {
+		if !earlier[p] {
+			fresh = append(fresh, p)
+		}
+	}
+	slices.Sort(fresh)
+	for i, path := range fresh {
+		destination := "cypress/results"
+		if len(fresh) > 1 {
+			destination = fmt.Sprintf("cypress/results/%d", i+1)
+		}
+		store(ctx, client, path, destination)
+	}
+}
+
+// store keeps a file, or a directory with anything in it, as artifacts.
+// Outside a job, or if the store fails, it says so and carries on: a failed
+// store should not hide the suite's own result.
+func store(ctx context.Context, client *sdk.Client, path, destination string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if info.IsDir() {
+		if entries, err := os.ReadDir(path); err != nil || len(entries) == 0 {
+			return
+		}
+	}
+	err = client.StoreArtifacts(ctx, path, destination)
+	if err != nil && !errors.Is(err, sdk.ErrNoServer) {
+		fmt.Fprintf(os.Stderr, "setup-cypress: could not store %s: %v\n", destination, err)
+	}
+}
+
+// inDir resolves path against dir, as Cypress resolves its folders against
+// the project.
+func inDir(dir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
 }
 
 // deploymentURLEnvVars are where deploy steps leave the URL they deployed to,
