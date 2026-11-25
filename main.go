@@ -13,10 +13,8 @@ import (
 	"github.com/circleci-functions/toolkit/sdk"
 )
 
-type cli struct{}
-
-func (c *cli) Run(context.Context, *sdk.Client) error {
-	return nil
+type cli struct {
+	Install installCmd `cmd:"" help:"Install the Cypress binary the project's Cypress package needs, caching it across jobs."`
 }
 
 func main() {
